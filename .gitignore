@@ -1,0 +1,21 @@
+# Binary
+k0
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# K-0 data
+.k0/
+*.log
