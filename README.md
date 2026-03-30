@@ -10,10 +10,9 @@
 
 <p align="center">
   <a href="#features">Features</a> •
-  <a href="#quick-start">Quick Start</a> •
+  <a href="#install">Install</a> •
   <a href="#usage">Usage</a> •
   <a href="#architecture">Architecture</a> •
-  <a href="#configuration">Configuration</a> •
   <a href="#license">License</a>
 </p>
 
@@ -22,14 +21,14 @@
   <img src="https://img.shields.io/badge/go-1.22+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go"/>
   <img src="https://img.shields.io/badge/platform-Kali%20Linux-557C94?style=flat-square&logo=kalilinux&logoColor=white" alt="Kali"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License"/>
-  <img src="https://img.shields.io/badge/LLM-Ollama-FF6B6B?style=flat-square" alt="Ollama"/>
+  <img src="https://img.shields.io/badge/AI-embedded-FF6B6B?style=flat-square" alt="Embedded AI"/>
 </p>
 
 ---
 
-K-0 is an **offline-first, keyboard-driven TUI agent** that turns natural language security goals into structured pentest plans — then executes them with your explicit approval. Built in Go with [Bubbletea](https://github.com/charmbracelet/bubbletea) and designed for Kali Linux.
+K-0 is a **self-contained, offline-first security agent** for Kali Linux. It ships with its own AI model — no API keys, no cloud services, no configuration. Install it, type `k0`, and start hacking.
 
-Think of it as a **co-pilot for red teamers** — you describe what you want to test, K-0 generates the plan, you confirm, and it runs the tools.
+The embedded **k0-pentest** model (built on [xploiter/pentester](https://ollama.com/xploiter/pentester)) is purpose-trained for offensive security. It understands pentest methodology, knows Kali tools, and generates structured attack plans from plain English goals. Everything runs locally on your machine.
 
 <p align="center">
   <img src="docs/k0-demo.png" alt="K-0 in action" width="700"/>
@@ -37,37 +36,44 @@ Think of it as a **co-pilot for red teamers** — you describe what you want to 
 
 ## Features
 
+### 🧠 Embedded AI — Zero Configuration
+K-0 ships with everything it needs. The installer automatically:
+- Pulls the `xploiter/pentester` base model
+- Creates the `k0-pentest` tool-calling wrapper via the bundled `Modelfile`
+- Generates a default config at `~/.kiai/config.json`
+- Starts Ollama if it isn't running
+
+**You never touch Ollama directly.** No API keys. No environment variables. Just `k0`.
+
 ### 🎯 Natural Language → Pentest Plan
-Type your objective in plain English. K-0 generates a multi-phase attack plan using the right tools for the job.
+Type your objective in plain English. K-0 generates a multi-phase attack plan:
 
 ```
 goal: full recon on 192.168.1.0/24
 ```
 
-K-0 responds with a structured plan:
+K-0 responds:
 ```
 Phase 1: Network Discovery
   └─ nmap -sn 192.168.1.0/24
 
-Phase 2: Service Enumeration  
+Phase 2: Service Enumeration
   └─ nmap -sV -sC -p- <live_hosts>
 
 Phase 3: Vulnerability Scan
   └─ nmap --script=vuln <targets>
+
+Approve? [y/n]
 ```
 
 ### ⚡ Instant Template Matching
-Common pentest patterns (web scan, recon, DNS, brute-force) are matched instantly — **zero LLM latency**. Novel goals fall back to the AI planner.
+Common pentest patterns (web scan, recon, DNS, brute-force) are matched instantly — **zero LLM latency**. Only novel or complex goals hit the AI model.
 
 ### 🔒 Human-in-the-Loop
-**No tool runs without your explicit `y`.** Every plan shows:
-- Exact commands to be executed
-- Risk assessment
-- Tool availability check
-- Scope boundaries
+**Nothing runs without your explicit approval.** Every plan shows exact commands, risk level, tool availability, and scope boundaries before you confirm.
 
 ### 🛡️ Scope Enforcement
-Define your target scope. K-0 refuses to execute anything outside it. Hard boundaries, not suggestions.
+Define your engagement scope. K-0 hard-refuses anything outside it — at the orchestrator level, not as a suggestion.
 
 ### 🔧 30+ Kali Tools
 Native support for the essential toolkit:
@@ -82,8 +88,7 @@ Native support for the essential toolkit:
 | **Wireless** | aircrack-ng, wifite |
 | **Post-Exploit** | enum4linux, smbclient, crackmapexec |
 
-### 🧠 AI-Powered Analysis
-Powered by local LLMs via [Ollama](https://ollama.com). Fully offline — your data never leaves your machine.
+K-0 verifies tool availability before planning and can request permission to install missing packages.
 
 ### 🖥️ Premium TUI
 Built with [Bubbletea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss):
@@ -95,44 +100,28 @@ Built with [Bubbletea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](
 
 ---
 
-## Quick Start
+## Install
 
 ### Prerequisites
-- **Kali Linux** (or any Debian-based distro with pentest tools)
+- **Kali Linux** (or any Debian-based distro with pentest tools installed)
 - **Go 1.22+**
-- **Ollama** running locally or on your network
+- **Ollama** installed (the installer handles everything else)
 
-### Install
+### One Command Install
 
-#### Option 1: One-liner
-```bash
-curl -fsSL https://raw.githubusercontent.com/cogniwatchdev/k0/main/install/install.sh | bash
-```
-
-#### Option 2: Build from source
 ```bash
 git clone https://github.com/cogniwatchdev/k0.git
 cd k0
-go build -o k0 ./cmd/k0/
-sudo mv k0 /usr/local/bin/
+chmod +x install/install.sh
+./install/install.sh
 ```
 
-#### Option 3: Go install
-```bash
-go install github.com/cogniwatchdev/k0/cmd/k0@latest
-```
-
-### Configure Ollama
-
-K-0 needs an Ollama instance with a tool-calling capable model:
-
-```bash
-# If Ollama is on the same machine
-ollama pull llama3.1
-
-# Or point K-0 to a remote Ollama instance
-export K0_OLLAMA_HOST=http://192.168.0.100:11434
-```
+That's it. The installer:
+1. Builds the Go binary
+2. Installs the `k0` launcher to `/usr/local/bin/`
+3. Starts Ollama if needed
+4. Pulls and creates the `k0-pentest` model automatically
+5. Generates default config at `~/.kiai/config.json`
 
 ### Run
 
@@ -140,7 +129,7 @@ export K0_OLLAMA_HOST=http://192.168.0.100:11434
 k0
 ```
 
-That's it. Type `goal: <your objective>` and go.
+No setup wizards. No API keys. Just type your goal.
 
 ---
 
@@ -149,12 +138,11 @@ That's it. Type `goal: <your objective>` and go.
 ### Basic Flow
 
 ```
-1. Launch K-0           →  k0
-2. Set your goal        →  goal: web scan example.com
-3. Review the plan      →  K-0 shows phases, tools, risk level
-4. Confirm execution    →  y / n
-5. Watch results        →  Real-time tool output in the chat panel
-6. Get findings         →  Automated report generation
+1. Launch          →  k0
+2. Set your goal   →  goal: web scan example.com
+3. Review the plan →  K-0 shows phases, tools, risk level
+4. Confirm         →  y / n
+5. Watch results   →  Real-time tool output in the chat panel
 ```
 
 ### Keyboard Shortcuts
@@ -194,68 +182,38 @@ goal: wireless network discovery
 │                                                      │
 │  Orchestrator                                        │
 │  ├── Template Matcher (instant plans)                │
-│  ├── LLM Planner (novel goals → Ollama)              │
+│  ├── LLM Planner (novel goals)                       │
 │  ├── Scope Enforcer                                  │
 │  └── Tool Executor (per-tool timeouts)               │
 │                                                      │
 ├──────────────────────────────────────────────────────┤
-│  LLM Client ──► Ollama (local / remote)              │
-│  Memory Store ──► ~/.k0/memory/                      │
-│  Report Writer ──► ~/.k0/reports/                    │
+│  Embedded k0-pentest model (via Ollama)              │
+│  └── xploiter/pentester + tool-calling Modelfile     │
+│     Auto-managed · No user configuration             │
 └──────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Decisions
 
-- **Template matching first** — 6 common pentest patterns are matched instantly without any LLM call. Only novel objectives hit the AI.
-- **Per-tool timeouts** — Each tool has its own execution timeout to prevent hung scans.
+- **Self-contained** — The AI model is embedded. The installer pulls it, wraps it with tool-calling support, and configures it automatically. Users never interact with Ollama.
+- **Offline-first** — No cloud APIs, no telemetry, no data leaves the machine. Your scans and findings stay local.
+- **Template matching first** — 6 common pentest patterns are matched instantly. Only novel objectives hit the AI model.
+- **Per-tool timeouts** — Each tool execution has its own timeout to prevent hung scans.
 - **Scope enforcement** — Hard boundaries at the orchestrator level. The AI cannot bypass scope restrictions.
 - **Soul files** — Persona, methodology, and tradecraft are embedded as markdown files (`soul/`) that shape the AI's reasoning.
 
 ---
 
-## Configuration
-
-K-0 stores its config at `~/.k0/config.yaml`:
-
-```yaml
-ollama:
-  host: http://localhost:11434
-  model: llama3.1              # Any Ollama model with tool-calling
-  timeout: 300s
-
-scope:
-  targets:
-    - 192.168.1.0/24           # Allowed target ranges
-  excluded:
-    - 192.168.1.1              # Exclude gateway
-
-agent:
-  max_phases: 5
-  require_confirmation: true   # Never runs without approval
-  auto_install_tools: false    # Ask before installing missing tools
-```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `K0_OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
-| `K0_MODEL` | `llama3.1` | Default model |
-| `K0_DATA_DIR` | `~/.k0` | Data directory for memory and reports |
-
----
-
 ## Soul Files
 
-K-0's personality and methodology are defined by markdown files in the `soul/` directory:
+K-0's thinking is shaped by markdown knowledge files in the `soul/` directory:
 
 | File | Purpose |
 |---|---|
-| `PERSONA.md` | Core agent identity and communication style |
+| `PERSONA.md` | Agent identity and communication style |
 | `MINDSET.md` | Red team methodology and thinking patterns |
 | `TOOLS.md` | Tool selection heuristics and preferences |
-| `TRADECRAFT.md` | Operational security and stealth guidance |
+| `TRADECRAFT.md` | Operational security guidance |
 | `OWASP.md` | OWASP Top 10 testing methodology |
 | `OSINT.md` | Open-source intelligence techniques |
 | `METASPLOIT.md` | Metasploit Framework usage patterns |
@@ -263,9 +221,30 @@ K-0's personality and methodology are defined by markdown files in the `soul/` d
 
 ---
 
+## Configuration
+
+K-0 works out of the box. For power users, the config lives at `~/.kiai/config.json`:
+
+```json
+{
+  "ollama_addr": "http://127.0.0.1:11434",
+  "model": "k0-pentest:latest",
+  "memory_path": "~/.kiai/memory",
+  "semantic_memory": false,
+  "web_search_enabled": false,
+  "telemetry": false,
+  "theme": "kali-purple"
+}
+```
+
+Most users will never need to edit this. It's there if you want to point K-0 at a remote Ollama instance or change the theme.
+
+---
+
 ## Roadmap
 
 - [x] Multi-panel TUI with Bubbletea
+- [x] Embedded k0-pentest model (auto-install)
 - [x] Template matching for instant plans
 - [x] Tool verification & auto-install
 - [x] Scope enforcement
@@ -280,10 +259,7 @@ K-0's personality and methodology are defined by markdown files in the `soul/` d
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines before submitting a PR.
-
 ```bash
-# Clone and build
 git clone https://github.com/cogniwatchdev/k0.git
 cd k0
 go build -o k0 ./cmd/k0/
@@ -294,9 +270,10 @@ go build -o k0 ./cmd/k0/
 
 ## Acknowledgements
 
+- [xploiter/pentester](https://ollama.com/xploiter/pentester) — The base pentest model
 - [Bubbletea](https://github.com/charmbracelet/bubbletea) — Terminal UI framework
 - [Lipgloss](https://github.com/charmbracelet/lipgloss) — Style definitions for terminal layouts
-- [Ollama](https://ollama.com) — Local LLM inference
+- [Ollama](https://ollama.com) — Local LLM runtime
 - [Kali Linux](https://www.kali.org) — The penetration testing platform
 
 ---
