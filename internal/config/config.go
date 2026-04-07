@@ -14,7 +14,7 @@ const (
 	DefaultOllamaAddr = "http://127.0.0.1:11434"
 	// DefaultModel is the primary text model served by Ollama.
 	DefaultModel = "k0-pentest:latest"
-	// DefaultGatewayAddr is the OpenClaw gateway address (hidden runtime).
+	// DefaultGatewayAddr is the internal gateway address.
 	DefaultGatewayAddr = "http://127.0.0.1:19876"
 	// ConfigDir is the user config directory name.
 	ConfigDir = ".kiai"
@@ -34,7 +34,7 @@ type Config struct {
 	SemanticMemory  bool   `json:"semantic_memory"`
 	SummarizeEvery  int    `json:"summarize_every_mins"`
 
-	// Gateway (hidden OpenClaw runtime)
+	// Gateway
 	GatewayAddr string `json:"gateway_addr"`
 
 	// Recon settings

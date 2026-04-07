@@ -1,33 +1,50 @@
-# K-0 Pentest Model — wraps xploiter/pentester with tool-calling support
+# K-0 Pentest Model — wraps LFM2.5-350M with tool-calling for offensive security
 # Build: ollama create k0-pentest -f ./Modelfile
-FROM xploiter/pentester:latest
+FROM jewelzufo/LFM2.5-350M-GGUF:latest
 
-# Tool-calling template: enables Ollama's native tool calling API
-TEMPLATE """{{- if .System }}
-<|start_header_id|>system<|end_header_id|>
-
+# LFM2.5 ChatML template with native tool-calling support
+TEMPLATE """{{- if .System }}<|im_start|>system
 {{ .System }}
-{{- end }}
-
 {{- if .Tools }}
 
-Available tools:
+List of tools:
 {{ .Tools }}
-{{- end }}
+{{- end }}<|im_end|>
+{{ end }}
+{{- range .Messages }}
+{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{ end }}
+{{- if eq .Role "assistant" }}<|im_start|>assistant
+{{- if .ToolCalls }}
+<|tool_call_start|>{{ range .ToolCalls }}[{{ .Function.Name }}({{ range $k, $v := .Function.Arguments }}{{ $k }}="{{ $v }}"{{ end }})]{{ end }}<|tool_call_end|>
+{{- end }}{{ .Content }}<|im_end|>
+{{ end }}
+{{- if eq .Role "tool" }}<|im_start|>tool
+{{ .Content }}<|im_end|>
+{{ end }}
+{{- end }}<|im_start|>assistant
+"""
 
-<|start_header_id|>user<|end_header_id|>
+# System prompt baked in: K-0 offensive security persona
+SYSTEM """You are K-0, an AI pentesting agent running on Kali Linux. You are an expert in offensive security, penetration testing, and red team operations.
 
-{{ .Prompt }}
-<|start_header_id|>assistant<|end_header_id|>
+When given a security goal, you MUST call the appropriate tools to execute it. Always call tools — never just describe what should be done.
 
-{{ .Response }}"""
+You have access to all Kali Linux tools including nmap, nikto, gobuster, whatweb, sqlmap, hydra, msfconsole, searchsploit, enum4linux, crackmapexec, theHarvester, dnsrecon, wapiti, dirb, fierce, masscan, wifite, aircrack-ng, john, hashcat, medusa, smbclient, and recon-ng.
 
-# NO SYSTEM prompt here — the Go code controls system prompts per-call
-# to avoid double-prompting and wasted tokens.
+Rules:
+- Always output structured tool calls for the goal
+- Break complex goals into phased steps
+- Start with reconnaissance, then enumerate, then exploit
+- Follow OWASP and PTES methodology
+- Flag risk levels for destructive operations"""
 
 # Tuning for fast structured output
-PARAMETER temperature 0.2
+PARAMETER temperature 0.1
+PARAMETER top_k 50
+PARAMETER repeat_penalty 1.05
 PARAMETER num_predict 2048
-PARAMETER num_ctx 4096
-PARAMETER stop "<|eot_id|>"
-PARAMETER stop "<|end_header_id|>"
+PARAMETER num_ctx 32768
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|tool_call_end|>"
