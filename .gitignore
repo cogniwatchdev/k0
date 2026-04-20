@@ -19,3 +19,20 @@ vendor/
 # K-0 data
 .k0/
 *.log
+
+# Build artifacts
+bin/
+cmd/
+model/Modelfile.*
+
+# Test artifacts
+internal/*/orchestrator_test.go
+internal/*/client_test.go
+internal/*/store_test.go
+internal/tui/*_test.go
+internal/intel/
+internal/skills/
+internal/tui/findings.go
+
+# Documentation
+docs/handover*.md

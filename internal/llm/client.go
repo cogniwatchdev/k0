@@ -105,6 +105,78 @@ type generateResponse struct {
 	Done     bool   `json:"done"`
 }
 
+// StreamToken is a single token from a streaming LLM call.
+type StreamToken struct {
+	Text string
+	Err  error
+}
+
+// StreamComplete sends a prompt and returns a channel that yields tokens
+// as they arrive from the LLM. The channel is closed when done.
+// The last token will have empty Text and Err == nil to signal completion.
+func (c *Client) StreamComplete(ctx context.Context, system, prompt string) <-chan StreamToken {
+	ch := make(chan StreamToken, 32)
+	go func() {
+		defer close(ch)
+		fullSystem := c.buildSystem(system)
+
+		body, err := json.Marshal(generateRequest{
+			Model:   c.model,
+			Prompt:  prompt,
+			System:  fullSystem,
+			Stream:  true,
+			Options: map[string]any{
+				"temperature": 0.2,
+				"num_predict": 2048,
+			},
+		})
+		if err != nil {
+			ch <- StreamToken{Err: fmt.Errorf("llm: marshal: %w", err)}
+			return
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			c.addr+"/api/generate", bytes.NewReader(body))
+		if err != nil {
+			ch <- StreamToken{Err: fmt.Errorf("llm: request: %w", err)}
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			ch <- StreamToken{Err: fmt.Errorf("llm: do: %w", err)}
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			ch <- StreamToken{Err: fmt.Errorf("llm: status %d: %s", resp.StatusCode, b)}
+			return
+		}
+
+		// Read SSE-like stream: each line is a JSON object with "response" and "done" fields
+		decoder := json.NewDecoder(resp.Body)
+		for {
+			var chunk generateResponse
+			if err := decoder.Decode(&chunk); err != nil {
+				// EOF means stream ended — this is normal for streaming
+				break
+			}
+			if chunk.Response != "" {
+				ch <- StreamToken{Text: chunk.Response}
+			}
+			if chunk.Done {
+				break
+			}
+		}
+		// Signal completion
+		ch <- StreamToken{}
+	}()
+	return ch
+}
+
 // ─── Core methods ──────────────────────────────────────────────────────────
 
 // Complete sends a prompt and returns the raw text response.
@@ -112,11 +184,14 @@ type generateResponse struct {
 func (c *Client) Complete(ctx context.Context, system, prompt string) (string, error) {
 	return c.complete(ctx, c.buildSystem(system), prompt, "", 0.2, 2048)
 }
-
-// CompleteJSON sends a prompt with Ollama's format:"json" mode.
-// Uses LEAN system prompt (no soul) for speed — JSON calls don't need persona.
+// CompleteJSON sends a prompt requesting JSON output.
+// NOTE: We intentionally do NOT use Ollama's format:"json" mode because it
+// conflicts with thinking models (qwen3) which produce empty {} responses.
+// Instead, we rely on our extractJSONArray/extractJSONObject helpers to
+// parse JSON from free-form output — this is more robust across models.
+// Callers should append /no_think to prompt for qwen3 thinking models.
 func (c *Client) CompleteJSON(ctx context.Context, system, prompt string) (string, error) {
-	return c.complete(ctx, c.buildSystemLean(system), prompt, "json", 0.1, 256)
+	return c.complete(ctx, c.buildSystemLean(system), prompt, "", 0.3, 1024)
 }
 
 func (c *Client) complete(ctx context.Context, system, prompt, format string, temp float64, maxTokens int) (string, error) {
@@ -185,9 +260,10 @@ Rules:
 - Be specific with commands — include actual flags and targets
 - Keep estimates realistic for CPU-only inference
 - Always include a final report phase
-- Output ONLY the JSON object. No explanation. No markdown fences.`
+- Output ONLY the JSON object. No explanation. No markdown fences.
+/no_think`
 
-	prompt := fmt.Sprintf("Goal: %s", goal)
+	prompt := fmt.Sprintf("Goal: %s\n/no_think", goal)
 	raw, err := c.CompleteJSON(ctx, system, prompt)
 	if err != nil {
 		return "", err
@@ -211,9 +287,10 @@ Always end the array with a report task: {"id":"report-01","type":"report","labe
 
 Available tools: nmap, nikto, whatweb, ffuf, gobuster, wpscan, sqlmap, hydra, searchsploit, enum4linux, smbclient, crackmapexec, subfinder, whois, dig
 
-Output ONLY the JSON array. No explanation. No markdown fences.`
+Output ONLY the JSON array. No explanation. No markdown fences.
+/no_think`
 
-	prompt := fmt.Sprintf("Goal: %s", goal)
+	prompt := fmt.Sprintf("Goal: %s\n/no_think", goal)
 
 	raw, err := c.CompleteJSON(ctx, system, prompt)
 	if err != nil {
@@ -240,9 +317,10 @@ Output a JSON array of finding objects. Each must have:
   "cve": CVE ID if known, empty string otherwise
 
 If there are no security findings, output an empty array: []
-Output ONLY the JSON array.`
+Output ONLY the JSON array.
+/no_think`
 
-	prompt := fmt.Sprintf("Tool output from goal '%s':\n\n%s", goal, toolOutput)
+	prompt := fmt.Sprintf("Tool output from goal '%s':\n\n%s\n/no_think", goal, toolOutput)
 
 	raw, err := c.CompleteJSON(ctx, system, prompt)
 	if err != nil {
@@ -256,9 +334,10 @@ func (c *Client) SuggestNextSteps(ctx context.Context, goal string, findingsSumm
 	system := `Based on the security assessment results, suggest 3-5 specific next steps.
 Output a JSON array of strings. Each string is one actionable next step.
 Example: ["Run wpscan for WordPress vulnerabilities","Check /admin for default credentials"]
-Output ONLY the JSON array of strings.`
+Output ONLY the JSON array of strings.
+/no_think`
 
-	prompt := fmt.Sprintf("Goal: %s\nFindings summary:\n%s", goal, findingsSummary)
+	prompt := fmt.Sprintf("Goal: %s\nFindings summary:\n%s\n/no_think", goal, findingsSummary)
 
 	raw, err := c.CompleteJSON(ctx, system, prompt)
 	if err != nil {
@@ -291,6 +370,7 @@ func (c *Client) Ping(ctx context.Context) error {
 
 // extractJSONArray scans the raw LLM output for the first [...] JSON array.
 // Handles common model habits: prose before/after JSON, markdown fences, etc.
+// If the model outputs a single {...} object instead of an array, wraps it.
 func extractJSONArray(raw string) string {
 	raw = strings.TrimSpace(raw)
 
@@ -306,41 +386,42 @@ func extractJSONArray(raw string) string {
 		}
 	}
 
-	// Find the first [ and last ] to extract the array
+	// Try to find a JSON array first
 	start := strings.Index(raw, "[")
-	if start == -1 {
-		return "[]"
-	}
-
-	// Walk from start, track bracket depth to find matching ]
-	depth := 0
-	end := -1
-	for i := start; i < len(raw); i++ {
-		switch raw[i] {
-		case '[':
-			depth++
-		case ']':
-			depth--
-			if depth == 0 {
-				end = i + 1
+	if start != -1 {
+		// Walk from start, track bracket depth to find matching ]
+		depth := 0
+		end := -1
+		for i := start; i < len(raw); i++ {
+			switch raw[i] {
+			case '[':
+				depth++
+			case ']':
+				depth--
+				if depth == 0 {
+					end = i + 1
+					break
+				}
+			}
+			if end > 0 {
 				break
 			}
 		}
-		if end > 0 {
-			break
+
+		if end > start {
+			candidate := raw[start:end]
+			var check json.RawMessage
+			if json.Unmarshal([]byte(candidate), &check) == nil {
+				return candidate
+			}
 		}
 	}
 
-	if end <= start {
-		return "[]"
-	}
-
-	candidate := raw[start:end]
-
-	// Quick validation — is it valid JSON?
-	var check json.RawMessage
-	if json.Unmarshal([]byte(candidate), &check) == nil {
-		return candidate
+	// No valid array found — check if the model returned a single {...} object.
+	// Many smaller models output one object instead of an array. Wrap it.
+	obj := extractJSONObject(raw)
+	if obj != "{}" {
+		return "[" + obj + "]"
 	}
 
 	return "[]"

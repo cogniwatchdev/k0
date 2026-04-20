@@ -20,6 +20,8 @@ const (
 	TaskTypeWeb      = types.TaskTypeWeb
 	TaskTypeWireless = types.TaskTypeWireless
 	TaskTypeExploit  = types.TaskTypeExploit
+	TaskTypeSkill    = types.TaskTypeSkill
+	TaskTypeIntel    = types.TaskTypeIntel
 	TaskTypeReport   = types.TaskTypeReport
 )
 

@@ -13,7 +13,9 @@ const (
 	// DefaultOllamaAddr is the address of the bundled Ollama instance.
 	DefaultOllamaAddr = "http://127.0.0.1:11434"
 	// DefaultModel is the primary text model served by Ollama.
-	DefaultModel = "k0-pentest:latest"
+	// qwen3:1.7b produces reliable structured JSON output with /no_think,
+	// far superior to LFM2.5-350M for planning tasks.
+	DefaultModel = "qwen3:1.7b"
 	// DefaultGatewayAddr is the internal gateway address.
 	DefaultGatewayAddr = "http://127.0.0.1:19876"
 	// ConfigDir is the user config directory name.
@@ -49,6 +51,9 @@ type Config struct {
 
 	// TUI preferences
 	Theme string `json:"theme"` // "kali-purple" (default)
+
+	// Skills: external pentest skill scripts directory
+	SkillsDir string `json:"skills_dir,omitempty"` // e.g. "/opt/pentest_skills"
 }
 
 // Defaults returns a Config populated with safe, offline-first defaults.

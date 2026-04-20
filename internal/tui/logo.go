@@ -15,22 +15,26 @@ var (
 )
 
 // RenderLogo returns the K-0 logo centred in width.
-// Responsive: uses compact 2-line logo if terminal height < 30.
+// Responsive: uses compact 2-line logo if terminal height < 38.
+// Full logo (7 lines) + chrome (9 lines + 2 safety margin) = 18 lines overhead.
+// Below 38 rows the content area would be under 20 rows with the full logo —
+// switch to compact to keep a useful content area.
 func RenderLogo(width, height int) string {
-	if height < 30 {
+	if height < 38 {
 		return renderCompactLogo(width)
 	}
 	return renderFullLogo(width)
 }
 
 func renderCompactLogo(width int) string {
-	title := logoBannerStyle.Render("◆ K-0")
-	tag := logoTagStyle.Render(" · OPENCLAW ARCHITECTURE")
-	divider := logoSubStyle.Render(strings.Repeat("─", 40))
+	title := logoBannerStyle.Render("[K-0]")
+	tag := logoTagStyle.Render(" OPENCLAW ARCHITECTURE ")
+	divider := logoSubStyle.Render(strings.Repeat("-", 40))
 	return centre(title+tag, width) + "\n" + centre(divider, width)
 }
 
 func renderFullLogo(width int) string {
+	// Unicode box-drawing characters — 6 art lines + divider + subtitle = 8 lines total
 	artLines := []string{
 		`██╗  ██╗       ██████╗ `,
 		`██║ ██╔╝      ██╔═████╗`,
@@ -62,7 +66,8 @@ func RenderStatusDot(status, version, node string) string {
 	default:
 		colour = StatusError
 	}
-	dot := lipgloss.NewStyle().Foreground(colour).Render("●")
+	// Use ASCII dot instead of Unicode bullet to avoid width issues
+	dot := lipgloss.NewStyle().Foreground(colour).Bold(true).Render("*")
 	text := lipgloss.NewStyle().Foreground(TextSecondary).Render(
 		" " + status + " | " + version + " | " + node,
 	)

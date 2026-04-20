@@ -13,13 +13,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/k0-agent/k0/internal/agent"
 	"github.com/k0-agent/k0/internal/config"
+	"github.com/k0-agent/k0/internal/types"
 )
+
+// FindingMsg carries a security finding to the TUI.
+type FindingMsg struct {
+	Finding    types.Finding
+	TaskLabel  string
+}
 
 type view int
 
 const (
 	viewChat view = iota
 	viewMemory
+	viewFindings
 	viewSettings
 )
 
@@ -37,6 +45,7 @@ type model struct {
 	input        textinput.Model
 	chatView     *chatViewModel
 	memoryView   memoryViewModel
+	findingsView findingsViewModel
 	settingsView settingsViewModel
 	orchestrator *agent.Orchestrator
 	statusLine   string
@@ -47,6 +56,9 @@ type model struct {
 	spinnerIdx   int                 // current spinner frame index
 	lastActivity string              // last agent label that sent an update
 	pendingPlan  *agent.PlanProposal // non-nil when waiting for y/n
+	totalTasks   int                 // total tasks in current goal
+	doneTasks    int                 // completed tasks in current goal
+	totalFindings int                // findings count across entire session
 }
 
 func newModel(cfg *config.Config) model {
@@ -64,10 +76,11 @@ func newModel(cfg *config.Config) model {
 		input:        ti,
 		chatView:     &cv,
 		memoryView:   newMemoryViewModel(cfg),
+		findingsView: newFindingsViewModel(),
 		settingsView: newSettingsViewModel(cfg),
 		orchestrator: orch,
 		statusLine:   "CHECKING",
-		version:      "v0.3.1",
+		version:      "v0.4.0",
 		nodeLabel:    "LOCAL",
 		activeView:   viewChat,
 	}
@@ -154,7 +167,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Blur()
 			m.input.Focus()
 		case "tab":
-			m.activeView = (m.activeView + 1) % 3
+			m.activeView = (m.activeView + 1) % 4
 		case "enter":
 			if m.pendingPlan != nil {
 				// Handle plan confirmation (y/n)
@@ -240,7 +253,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chatView.appendUpdate(msg)
 		m.statusLine = "BUSY"
 		m.lastActivity = msg.AgentLabel
+		// Detect task start/done lines for progress tracking
+		if strings.Contains(msg.Line, "Running") && strings.Contains(msg.Line, "task(s)") {
+			// Parse "Running N task(s)..." to set total
+			var n int
+			fmt.Sscanf(msg.Line, "Running %d task", &n)
+			if n > 0 {
+				m.totalTasks = n
+				m.doneTasks = 0
+			}
+		}
+		// Detect findings in update lines
+		for _, sev := range []string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"} {
+			if strings.Contains(msg.Line, "["+sev+"]") {
+				m.totalFindings++
+			}
+		}
 		cmds = append(cmds, m.orchestrator.ListenUpdates())
+
+	case FindingMsg:
+		m.findingsView.addFinding(msg.Finding, msg.TaskLabel)
+		m.totalFindings = len(m.findingsView.findings)
+
+	case agent.LLMStreamMsg:
+		// Show LLM stream tokens in the chat as a single updating line
+		m.chatView.updateStreamingLine(msg)
 
 	case agent.TaskDoneMsg:
 		elapsed := time.Since(m.busyStart).Round(time.Second)
@@ -253,6 +290,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusLine = "READY"
 		m.busy = false
 		m.lastActivity = ""
+		m.doneTasks = m.totalTasks
 	}
 
 	switch m.activeView {
@@ -264,6 +302,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewMemory:
 		var cmd tea.Cmd
 		m.memoryView, cmd = m.memoryView.Update(msg)
+		cmds = append(cmds, cmd)
+	case viewFindings:
+		var cmd tea.Cmd
+		m.findingsView, cmd = m.findingsView.Update(msg)
 		cmds = append(cmds, cmd)
 	case viewSettings:
 		var cmd tea.Cmd
@@ -278,17 +320,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// logoLineCount returns how many lines the logo takes for a given height.
+func logoLineCount(height int) int {
+	if height < 38 {
+		return 2 // compact logo — saves space on smaller terminals
+	}
+	return 8 // full Unicode logo: 6 art + 1 separator + 1 tagline
+}
+
 func (m model) View() string {
 	if m.width == 0 {
 		return "Loading K-0..."
 	}
 
-	contentH := m.height - 14
+	logo := RenderLogo(m.width, m.height)
+	logoLines := logoLineCount(m.height)
+
+	// Dynamic vertical budget — exact line count:
+	//   logo (8 full / 2 compact) + status (1) + blank (1) + tabs (1) + content + blank (1) + hints (1) + input (2)
+	//   PanelFocused.Height(contentH) renders contentH+2 lines (border top/bottom)
+	//   InputBar renders 2 lines (BorderTop + content)
+	//   So total = logoLines + 1 + 1 + 1 + (contentH + 2) + 1 + 1 + 2 = logoLines + 9 + contentH
+	//   For fit: contentH = height - logoLines - 9
+	//
+	//   NOTE: safetyMargin = 0 because terminal emulators (iTerm2, Terminal.app)
+	//   report window height including title bar. Any positive margin pushes
+	//   the logo off-screen.
+	const safetyMargin = 0
+	chromeLines := logoLines + 9 + safetyMargin
+	contentH := m.height - chromeLines
 	if contentH < 4 {
 		contentH = 4
 	}
-
-	logo := RenderLogo(m.width, m.height)
 
 	// Status dot
 	var statusDotStr string
@@ -316,6 +379,8 @@ func (m model) View() string {
 		content = m.chatView.View(m.width-4, contentH, m.busy, m.spinnerIdx, m.busyStart)
 	case viewMemory:
 		content = m.memoryView.View(m.width-4, contentH)
+	case viewFindings:
+		content = m.findingsView.View(m.width-4, contentH)
 	case viewSettings:
 		content = m.settingsView.View(m.width-4, contentH)
 	}
@@ -326,7 +391,7 @@ func (m model) View() string {
 		// Waiting for confirmation
 		confirmHint := lipgloss.NewStyle().Foreground(KaliPurpleBright).Render("Proceed? ")
 		inputLine = InputBar.Width(m.width - 4).Render(
-			Prompt.Render("[🐉] K-0> ") + confirmHint + m.input.View(),
+			Prompt.Render("[K0] > ") + confirmHint + m.input.View(),
 		)
 	} else if m.busy {
 		elapsed := time.Since(m.busyStart).Round(time.Second)
@@ -335,11 +400,11 @@ func (m model) View() string {
 			fmt.Sprintf(" K-0 is working... %s elapsed", elapsed),
 		)
 		inputLine = InputBar.Width(m.width - 4).Render(
-			Prompt.Render("[🐉] K-0> ") + spinner + waitMsg,
+			Prompt.Render("[K0] > ") + spinner + waitMsg,
 		)
 	} else {
 		inputLine = InputBar.Width(m.width - 4).Render(
-			Prompt.Render("[🐉] K-0> ") + m.input.View(),
+			Prompt.Render("[K0] > ") + m.input.View(),
 		)
 	}
 
@@ -366,24 +431,59 @@ func (m model) View() string {
 }
 
 func (m model) renderTabs() string {
-	labels := []string{"Chat", "Memory", "Settings"}
-	tabs := make([]string, len(labels))
-	for i, label := range labels {
+	type tabDef struct {
+		label  string
+		badge  string // optional count badge
+	}
+	tabs := []tabDef{
+		{label: "Chat"},
+		{label: "Memory"},
+		{label: "Findings", badge: func() string {
+			if m.totalFindings > 0 {
+				return fmt.Sprintf("(%d)", m.totalFindings)
+			}
+			return ""
+		}()},
+		{label: "Settings"},
+	}
+	parts := make([]string, len(tabs))
+	for i, t := range tabs {
+		display := t.label
+		if t.badge != "" {
+			display += " " + t.badge
+		}
 		if view(i) == m.activeView {
-			tabs[i] = lipgloss.NewStyle().
+			parts[i] = lipgloss.NewStyle().
 				Foreground(KaliPurple).
 				Bold(true).
 				Underline(true).
 				Padding(0, 2).
-				Render(label)
+				Render(display)
 		} else {
-			tabs[i] = lipgloss.NewStyle().
+			parts[i] = lipgloss.NewStyle().
 				Foreground(TextMuted).
 				Padding(0, 2).
-				Render(label)
+				Render(display)
 		}
 	}
-	return StatusBar.Width(m.width).Render(
-		lipgloss.JoinHorizontal(lipgloss.Left, tabs...),
-	)
+
+	// Task progress indicator on the right side
+	progressStr := ""
+	if m.totalTasks > 0 {
+		done := m.doneTasks
+		total := m.totalTasks
+		pct := 0
+		if total > 0 {
+			pct = (done * 100) / total
+		}
+		barW := 10
+		filled := (pct * barW) / 100
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
+		progressStr = lipgloss.NewStyle().
+			Foreground(KaliPurpleBright).
+				Render(fmt.Sprintf(" %s %d/%d", bar, done, total))
+	}
+
+	tabBar := lipgloss.JoinHorizontal(lipgloss.Left, parts...)
+	return StatusBar.Width(m.width).Render(tabBar + progressStr)
 }

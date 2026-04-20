@@ -157,6 +157,15 @@ func (sa *Subagent) planTools() []toolStep {
 			{Tool: "whatweb", Args: fmt.Sprintf("-a 3 %s", target)},
 			{Tool: "nikto", Args: fmt.Sprintf("-h %s", target)},
 		}
+	case TaskTypeSkill:
+		// Skill tasks have cmd pre-built in detectSkillCommand
+		if cmd := sa.task.Params["cmd"]; cmd != "" {
+			tool, args := parseCmd(cmd)
+			if tool != "" {
+				return []toolStep{{Tool: tool, Args: args}}
+			}
+		}
+		return nil
 	default:
 		return nil
 	}

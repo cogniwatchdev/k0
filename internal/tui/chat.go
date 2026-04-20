@@ -45,8 +45,52 @@ func (m *chatViewModel) Update(msg tea.Msg) (*chatViewModel, tea.Cmd) {
 	return m, nil
 }
 
+// streamLineSentinel marks the chat line that shows live LLM stream output.
+const streamLineSentinel = "__STREAM__"
+
 func (m *chatViewModel) clear() {
 	m.lines = nil
+}
+
+// updateStreamingLine handles LLMStreamMsg by updating the streaming line in the chat.
+// It replaces the last streaming line with accumulated text, or creates one if none exists.
+func (m *chatViewModel) updateStreamingLine(msg agent.LLMStreamMsg) {
+	// Show a truncated preview of the accumulated LLM output
+	displayText := msg.Full
+	if len(displayText) > 120 {
+		displayText = displayText[:120] + "..."
+	}
+
+	// Find the last streaming line (search backwards for efficiency)
+	idx := -1
+	for i := len(m.lines) - 1; i >= 0; i-- {
+		if m.lines[i].Label == streamLineSentinel {
+			idx = i
+			break
+		}
+	}
+
+	if idx >= 0 {
+		// Update existing stream line in-place
+		m.lines[idx].Text = displayText
+	} else {
+		// Create new stream line
+		m.lines = append(m.lines, chatLine{
+			Label: streamLineSentinel,
+			Text:  displayText,
+		})
+	}
+}
+
+// clearStreamLines removes all streaming placeholder lines from the chat.
+func (m *chatViewModel) clearStreamLines() {
+	filtered := m.lines[:0]
+	for _, line := range m.lines {
+		if line.Label != streamLineSentinel {
+			filtered = append(filtered, line)
+		}
+	}
+	m.lines = filtered
 }
 
 func (m *chatViewModel) appendUpdate(msg agent.TaskUpdateMsg) {
@@ -70,6 +114,9 @@ func (m *chatViewModel) appendDone(msg agent.TaskDoneMsg) {
 
 // appendPlan renders the LLM plan as a formatted block in the chat.
 func (m *chatViewModel) appendPlan(plan agent.PlanProposal) {
+	// Clear any streaming placeholder lines before showing the final plan
+	m.clearStreamLines()
+
 	// Header
 	m.lines = append(m.lines, chatLine{
 		Label: "[K-0]",
@@ -195,7 +242,11 @@ func (m *chatViewModel) View(width, height int, busy bool, spinnerIdx int, busyS
 	var sb strings.Builder
 	for _, line := range m.lines[start:] {
 		var label, text string
-		if line.IsDone {
+		if line.Label == streamLineSentinel {
+			// AI streaming line — shows live LLM token output
+			label = lipgloss.NewStyle().Foreground(KaliPurple).Bold(true).Render("[AI]")
+			text = lipgloss.NewStyle().Foreground(KaliPurpleDim).Render(" " + line.Text)
+		} else if line.IsDone {
 			label = lipgloss.NewStyle().Foreground(StatusOK).Bold(true).Render(line.Label)
 			text = lipgloss.NewStyle().Foreground(StatusOK).Render(" " + line.Text)
 		} else if line.IsPlan {
@@ -204,6 +255,10 @@ func (m *chatViewModel) View(width, height int, busy bool, spinnerIdx int, busyS
 		} else if line.IsSystem {
 			label = lipgloss.NewStyle().Foreground(TextMuted).Render(line.Label)
 			text = lipgloss.NewStyle().Foreground(TextMuted).Render(" " + line.Text)
+		} else if isFindingLine(line.Text) {
+			// Severity-colored finding lines
+			label = AgentLabel.Render(line.Label)
+			text = colorizeFinding(" " + line.Text)
 		} else {
 			label = AgentLabel.Render(line.Label)
 			text = ToolLine.Render(" " + line.Text)
@@ -225,6 +280,35 @@ func (m *chatViewModel) View(width, height int, busy bool, spinnerIdx int, busyS
 	}
 
 	return PanelFocused.Width(width).Height(height).Render(sb.String())
+}
+
+// isFindingLine checks if a chat line contains a severity-tagged finding.
+func isFindingLine(s string) bool {
+	for _, sev := range []string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"} {
+		if strings.Contains(s, "["+sev+"]") {
+			return true
+		}
+	}
+	return false
+}
+
+// colorizeFinding renders severity-tagged text with the appropriate color.
+func colorizeFinding(s string) string {
+	for _, sev := range []struct {
+		tag   string
+		style lipgloss.Style
+	}{
+		{"[CRITICAL]", FindingCritical},
+		{"[HIGH]", FindingHigh},
+		{"[MEDIUM]", FindingMedium},
+		{"[LOW]", FindingLow},
+		{"[INFO]", FindingInfo},
+	} {
+		if strings.Contains(s, sev.tag) {
+			return sev.style.Render(s)
+		}
+	}
+	return ToolLine.Render(s)
 }
 
 func centreText(s string, w, h int) string {

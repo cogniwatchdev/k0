@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/k0-agent/k0/internal/config"
@@ -103,4 +104,92 @@ func (s *Store) ensureDirs() {
 	for _, d := range []string{"episodes", "knowledge", "entities", "reports", "cache"} {
 		_ = os.MkdirAll(config.MemoryDir(s.cfg, d), 0700)
 	}
+}
+
+// ListEpisodes returns recent episodes, sorted newest first, up to limit.
+func (s *Store) ListEpisodes(limit int) []Episode {
+	dir := config.MemoryDir(s.cfg, "episodes")
+	var episodes []Episode
+	// Walk all date directories
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	// Read dirs in reverse (newest first assuming YYYY-MM-DD names)
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !entries[i].IsDir() {
+			continue
+		}
+		dayDir := filepath.Join(dir, entries[i].Name())
+		files, err := os.ReadDir(dayDir)
+		if err != nil {
+			continue
+		}
+		// Reverse order within day dir too
+		for j := len(files) - 1; j >= 0; j-- {
+			if filepath.Ext(files[j].Name()) != ".json" {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dayDir, files[j].Name()))
+			if err != nil {
+				continue
+			}
+			var ep Episode
+			if json.Unmarshal(data, &ep) == nil {
+				episodes = append(episodes, ep)
+				if len(episodes) >= limit {
+					return episodes
+				}
+			}
+		}
+	}
+	return episodes
+}
+
+// ListKnowledge returns all knowledge entries, newest first, up to limit.
+func (s *Store) ListKnowledge(limit int) []KnowledgeEntry {
+	path := filepath.Join(config.MemoryDir(s.cfg, "knowledge"), "learnings.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var entries []KnowledgeEntry
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry KnowledgeEntry
+		if json.Unmarshal([]byte(line), &entry) == nil {
+			entries = append(entries, entry)
+		}
+	}
+	// Reverse: newest first
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return entries
+}
+
+// ListReports returns report filenames, newest first, up to limit.
+func (s *Store) ListReports(limit int) []string {
+	dir := config.MemoryDir(s.cfg, "reports")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	// Filter .md files
+	var reports []string
+	for i := len(entries) - 1; i >= 0; i-- {
+		if filepath.Ext(entries[i].Name()) == ".md" {
+			reports = append(reports, entries[i].Name())
+			if len(reports) >= limit {
+				break
+			}
+		}
+	}
+	return reports
 }

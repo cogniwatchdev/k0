@@ -13,6 +13,8 @@ const (
 	TaskTypeWeb      TaskType = "web"
 	TaskTypeWireless TaskType = "wireless"
 	TaskTypeExploit  TaskType = "exploit"
+	TaskTypeSkill    TaskType = "skill"
+	TaskTypeIntel    TaskType = "intel"
 	TaskTypeReport   TaskType = "report"
 )
 

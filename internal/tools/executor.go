@@ -220,5 +220,8 @@ func DefaultAllowList() AllowList {
 		"enum4linux":  {MaxRuntime: 10 * time.Minute, AutoApprove: true},
 		"smbclient":   {MaxRuntime: 5 * time.Minute, AutoApprove: true},
 		"crackmapexec":{MaxRuntime: m, AutoApprove: false},
+		// Skill scripts (python3 for pentest_skills)
+		"python3":      {MaxRuntime: m, AutoApprove: true},
+		"python":       {MaxRuntime: m, AutoApprove: true},
 	}
 }

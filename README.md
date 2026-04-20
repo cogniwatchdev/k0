@@ -247,7 +247,11 @@ Most users will never need to edit this.
 - [x] Scope enforcement
 - [x] Comprehensive Kali skills with Metasploit modules
 - [x] Full Kali installer (Go, Ollama, tools, model)
-- [ ] Streaming LLM responses
+- [x] Memory persistence (episodes, knowledge, reports)
+- [x] Live findings panel with severity color coding
+- [x] Headless runner (k0-run) for automated execution
+- [x] Streaming LLM responses
+- [x] Kali-optimized nmap performance (--top-ports, --max-rtt-timeout)
 - [ ] PDF/HTML report export
 - [ ] Plugin system for custom tools
 - [ ] Multi-target campaign mode
