@@ -87,6 +87,16 @@ Built with [Bubbletea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](
 - Animated thinking indicator
 - Keyboard-driven (Tab, Ctrl+L, Enter)
 
+### 💬 Natural Conversation Mode
+K-0 knows when you're chatting vs. working. Say "hi", "thanks", or "what can you do?" — get a friendly response, not an attack plan. Only pentest goals like `goal: scan 192.168.1.0/24` trigger planning.
+
+**Detected automatically:**
+- Greetings: "hi", "hello", "hey"
+- Farewells: "bye", "goodbye", "see you"
+- Thanks: "thanks", "thank you", "cheers"
+- Status: "how are you", "what can you do", "help"
+- Responses: "yes", "no", "sure", "ok"
+
 ---
 
 ## Install
